@@ -14,6 +14,7 @@ import torchvision.transforms.functional as transforms_f
 from otter.util.args import ExperimentConfig
 from otter.policy.otter import OTTER, create_text_mask
 from otter.util import misc
+from otter.util import clip_tokenizer
 from otter.dataset.utils import convert_abs_action
 from .vision_tf import clip_transform, crop2square
 
@@ -53,8 +54,16 @@ class OtterInference():
         # current proprioceptive state, updated in _proprocess_proprio, shape: (self.model.proprio_input_dim)
         self.current_proprio = None
 
+        # update lru caching
+        self.clip_tokenizer_cache_maxsize = self.args.shared_cfg.clip_tokenizer_cache_maxsize
+        self.update_clip_tokenizer_lru_caching()
+        
         # print the statistics of the model before eval
         print(self.model)
+    
+    def update_clip_tokenizer_lru_caching(self):
+        if self.clip_tokenizer_cache_maxsize > 0:
+            clip_tokenizer.enable_lru_caching(self.clip_tokenizer_cache_maxsize)
     
     def _proprocess_proprio(self, proprio : np.ndarray, gripper : np.ndarray) -> torch.Tensor:
         """
@@ -160,7 +169,7 @@ class OtterInference():
         proprio = self._proprocess_proprio(proprio, gripper) # shape: (self.model.proprio_input_dim)
 
         # preprocess text 
-        text = self.model.tokenizer.tokenize([text]).squeeze().to(self.device) # shape: (L)
+        text = clip_tokenizer.tokenize([text]).squeeze().to(self.device) # shape: (L)
 
         # create text mask 
         if self.model.pool_true_text:
