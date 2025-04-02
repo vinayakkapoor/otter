@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import clip
-from typing import Optional, Tuple, List, Union
+from typing import Optional, Tuple, List, Union, OrderedDict
 from otter.util.args import SharedConfig, ModelConfig
 from .transformer import AttentionPooling, CausalTransformer
 from .models import TextAwareVisualExtraction, ProprioceptionEncoder, ActionHead
@@ -54,6 +54,7 @@ class OTTER(nn.Module):
         vision_pooling_output_dim = model_config.vision_pooling_output_dim
         pooling_heads = model_config.pooling_heads
         pooling_layers = model_config.pooling_layers
+        clip_tokenizer_cache_size = model_config.clip_tokenizer_cache_size
         self.action_dim = model_config.action_dim
         self.first_k_tokens = model_config.first_k_tokens
         self.num_readouts = model_config.num_readouts
@@ -71,6 +72,14 @@ class OTTER(nn.Module):
         self.tokenizer = SimpleTokenizer()
         self.sot_token : int = self.tokenizer.encoder["<|startoftext|>"]
         self.eot_token : int = self.tokenizer.encoder["<|endoftext|>"]
+
+        if clip_tokenizer_cache_size > 0:
+            # Save the original unbounded bpe func 
+            self._original_tokenizer_bpe = self.tokenizer.bpe            
+            self._tokenizer_lru_cache_maxsize = clip_tokenizer_cache_size
+            self._tokenizer_lru_cache = OrderedDict()
+            self.tokenizer.bpe = self._lru_cache_bpe_wrapper
+            
 
         self.clip_model.eval()
         for param in self.clip_model.parameters():
@@ -145,6 +154,22 @@ class OTTER(nn.Module):
         # Add cache for transformer inputs
         self.cached_transformer_input = None
         self.cache_size = 0
+
+    def _lru_cache_bpe_wrapper(self, token):
+        if token in self._tokenizer_lru_cache:
+            # Cache hit: Move token to end (most recently used)
+            self._tokenizer_lru_cache.move_to_end(token)
+            return self._tokenizer_lru_cache[token] 
+        else:
+            # Cache miss: Call the *original* bpe method
+            result = self._original_tokenizer_bpe(token)
+            self._tokenizer_lru_cache[token] = result
+
+            # Check if cache exceeds max size and evict LRU item if needed
+            if len(self._tokenizer_lru_cache) > self._tokenizer_lru_cache_maxsize:
+                self._tokenizer_lru_cache.popitem(last=False) 
+
+            return result
     
     def reset_cache(self):
         """Reset the transformer input cache"""
@@ -349,7 +374,7 @@ class OTTER(nn.Module):
                 images = images.permute(0, 1, 2, 5, 3, 4) # (B, T, num_cameras, 3, H, W)
 
         if isinstance(text, list):
-            text = clip.tokenize(text).to(images.device) # (B, max_text_len)
+            text = self.tokenizer.tokenize(text).to(images.device) # (B, max_text_len)
         
         # Create mask for SOS, EOS, and padding tokens
         if self.pool_true_text:

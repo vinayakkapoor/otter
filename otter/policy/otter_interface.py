@@ -10,7 +10,6 @@ from scipy.spatial.transform import Rotation
 import PIL
 from PIL import Image
 import torchvision.transforms.functional as transforms_f
-import clip
 
 from otter.util.args import ExperimentConfig
 from otter.policy.otter import OTTER, create_text_mask
@@ -161,7 +160,7 @@ class OtterInference():
         proprio = self._proprocess_proprio(proprio, gripper) # shape: (self.model.proprio_input_dim)
 
         # preprocess text 
-        text = clip.tokenize([text]).squeeze().to(self.device) # shape: (L)
+        text = self.model.tokenizer.tokenize([text]).squeeze().to(self.device) # shape: (L)
 
         # create text mask 
         if self.model.pool_true_text:

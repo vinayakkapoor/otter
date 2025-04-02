@@ -169,6 +169,9 @@ class ModelConfig:
     # only true text token are used for attention pooling 
     pool_true_text : bool = False
 
+    # Clip tokenizer cache size
+    clip_tokenizer_cache_size : int = 50000   # Set to -1 for unlimited growth
+
 @dataclasses.dataclass
 class ActionDecoderConfig:
     # hidden size
